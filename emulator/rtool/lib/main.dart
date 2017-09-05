@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:location/location.dart';
 import 'messages.dart';
 
@@ -27,7 +28,7 @@ class MainScreen extends StatefulWidget {
 }
 
 class MainScreenState extends State<MainScreen> {
-  static final STATUS_BROADCAST_TIMEOUT = const Duration(seconds: 5);
+  static const STATUS_BROADCAST_TIMEOUT = const Duration(seconds: 5);
 
   final TextEditingController _serverIpTextController = new TextEditingController();
   final TextEditingController _idTextController = new TextEditingController();
@@ -37,6 +38,10 @@ class MainScreenState extends State<MainScreen> {
   List<Text> _messages = <Text>[];
   int _startIndex = 0;
 
+  static const MethodChannel platform = const MethodChannel("cernobor");
+  bool vibrating = false;
+  bool sounding = false;
+
   bool _running = false;
   Socket _socket;
   Location _location = new Location();
@@ -44,8 +49,37 @@ class MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return  new Scaffold(
+    Scaffold scaffold = new Scaffold(
       appBar: new AppBar(title: new Text("RTool")),
+      drawer: new Drawer(
+        child: new ListView(
+          children: <Widget>[
+            new DrawerHeader(child: new Text("Settings")),
+            new ListTile(
+              title: new Text('start/stop vibration'),
+              onTap: () {
+                if (vibrating) {
+                  _stopVibrate();
+                } else {
+                  _vibrate(8);
+                }
+                vibrating = !vibrating;
+              },
+            ),
+            new ListTile(
+              title: new Text('start/stop sound'),
+              onTap: () {
+                if (sounding) {
+                  _stopSound();
+                } else {
+                  _playFrequency(6000);
+                }
+                sounding = !sounding;
+              },
+            )
+          ],
+        ),
+      ),
       body: new Column(
         children: <Widget>[
           new TextFormField(
@@ -93,6 +127,7 @@ class MainScreenState extends State<MainScreen> {
         ]
       )
     );
+    return scaffold;
   }
 
   void _handleStartStop() {
@@ -125,6 +160,54 @@ class MainScreenState extends State<MainScreen> {
 
   String _getId() {
     return _idTextController.text;
+  }
+
+  Future<Null> _playFrequency(int frequency, [int duration]) async {
+    var params = {"frequency": frequency};
+    if (duration != null) {
+      print("Trying to play $frequency Hz for $duration ms");
+      params["duration"] = duration;
+    } else {
+      print("Trying to play $frequency Hz indefinitely");
+    }
+    try {
+      await platform.invokeMethod("playFrequency", params);
+    } on PlatformException catch (e) {
+      print(e);
+    }
+  }
+
+  Future<Null> _stopSound() async {
+    print("Stopping sound");
+    try {
+      await platform.invokeMethod("stopSound");
+    } on PlatformException catch (e) {
+      print(e);
+    }
+  }
+
+  Future<Null> _vibrate(int level, [int duration]) async {
+    var params = {"level": level};
+    if (duration != null) {
+      print("Trying to vibrate for $duration ms");
+      params["duration"] = duration;
+    } else {
+      print("Trying to vibrate for indefinitely");
+    }
+    try {
+      await platform.invokeMethod("vibrate", params);
+    } on PlatformException catch (e) {
+      print(e);
+    }
+  }
+
+  Future<Null> _stopVibrate() async {
+    print("Stopping vibration");
+    try {
+      await platform.invokeMethod("stopVibrate");
+    } on PlatformException catch (e) {
+      print(e);
+    }
   }
 
   void _ping() {
