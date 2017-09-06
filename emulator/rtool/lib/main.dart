@@ -295,7 +295,7 @@ class MainScreenState extends State<MainScreen> {
   void _statusBroadcast() {
     try {
       _location.getLocation.then((Map<String, double> loc) {
-        new StatusBroadcastMessage(_getId(), loc["latitude"], loc["longitude"]).send(_socket);
+        new StatusBroadcastMessage(_getId(), loc["latitude"], loc["longitude"], _settings.sensitivityRange).send(_socket);
       });
     } catch (exc) {
       print("Status broadcast exc: $exc");

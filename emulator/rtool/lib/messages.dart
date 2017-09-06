@@ -33,14 +33,15 @@ class PingMessage extends Message {
 class StatusBroadcastMessage extends Message {
   double lat;
   double lon;
+  int sensitivityRange;
 
-  StatusBroadcastMessage(String id, this.lat, this.lon) : super(id);
+  StatusBroadcastMessage(String id, this.lat, this.lon, this.sensitivityRange) : super(id);
 
   @override
   String get type => "status";
 
   @override
   Object get payload {
-    return {"lat": lat, "lon": lon};
+    return {"lat": lat, "lon": lon, "sensitivity-range": sensitivityRange};
   }
 }
