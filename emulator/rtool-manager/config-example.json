@@ -1,7 +1,7 @@
 {
   "power-spots": [
     {
-      "_comment": "name is optional, radiation-strength is not used now",
+      "_comment": "name is optional, radiation-strength is not used now (but mandatory)",
       "lat": 50.087703,
       "lon": 14.421147,
       "name": "mistr Jan Hus na Staroměstském náměstí",

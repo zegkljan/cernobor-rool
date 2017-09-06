@@ -217,8 +217,10 @@ class MainScreenState extends State<MainScreen> {
       Socket.connect(_managerHostController.text, 6644).then((socket) {
         setState(() => _addLogMessage("Connected!"));
         _socket = socket;
-        _socket.listen((data) {
-          setState(() => _addLogMessage(UTF8.decode(data)));
+        _socket.listen((List<int> data) {
+          String message = UTF8.decode(data);
+          _handleMessage(message);
+          setState(() => _addLogMessage(message));
         });
         _statusTimer = new Timer.periodic(STATUS_BROADCAST_TIMEOUT, (_) {
           print("broadcasting status");
@@ -232,6 +234,19 @@ class MainScreenState extends State<MainScreen> {
       _socket = null;
       if (_statusTimer != null) {
         _statusTimer.cancel();
+      }
+    }
+  }
+
+  void _handleMessage(String message) {
+    var msg = JSON.decode(message);
+    if (IncomingMessage.POWER_SPOT_RSSI.getTypeName() == msg["type"]) {
+      double dBm = msg["dBm"];
+      double dBmThreshold = msg["dBm-threshold"];
+      if (dBm > dBmThreshold) {
+        _vibrate((dBm - dBmThreshold) / dBmThreshold);
+      } else {
+        _stopVibrate();
       }
     }
   }

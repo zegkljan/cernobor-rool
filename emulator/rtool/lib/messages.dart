@@ -1,6 +1,18 @@
 import 'dart:convert';
 import 'dart:io';
 
+class IncomingMessage {
+  final String _value;
+  const IncomingMessage._internal(this._value);
+
+  static const POWER_SPOT_RSSI = const IncomingMessage._internal('power-spot-rssi');
+  static const CHANNELING_RSSI = const IncomingMessage._internal('channeling-rssi');
+
+  String getTypeName() {
+    return _value;
+  }
+}
+
 abstract class Message {
   String id;
   String get type;
