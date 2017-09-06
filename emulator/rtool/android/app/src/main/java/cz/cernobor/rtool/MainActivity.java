@@ -13,15 +13,13 @@ import io.flutter.plugins.GeneratedPluginRegistrant;
 
 public class MainActivity extends FlutterActivity {
     private static final String CHANNEL = "cernobor";
-    AudioTrack audioTrack;
-    VibratorProxy vibratorProxy;
+    private AudioTrack audioTrack;
+    private VibratorProxy vibratorProxy;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         GeneratedPluginRegistrant.registerWith(this);
-
-        vibratorProxy = new VibratorProxy((Vibrator) getSystemService(VIBRATOR_SERVICE));
 
         new MethodChannel(getFlutterView(), CHANNEL).setMethodCallHandler(
                 new MethodChannel.MethodCallHandler() {
@@ -42,7 +40,10 @@ public class MainActivity extends FlutterActivity {
                                 stopSound();
                                 break;
                             case "vibrate": {
-                                Integer level = methodCall.<Integer>argument("level");
+                                Double level = methodCall.argument("level");
+                                if (vibratorProxy == null) {
+                                    vibratorProxy = new VibratorProxy((Vibrator) getSystemService(VIBRATOR_SERVICE));
+                                }
                                 vibratorProxy.vibrate(level);
                                 break;
                             }

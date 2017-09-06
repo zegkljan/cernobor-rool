@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:location/location.dart';
 import 'messages.dart';
+import 'settings.dart';
 
 void main() {
   runApp(new RToolApp());
@@ -30,9 +31,12 @@ class MainScreen extends StatefulWidget {
 class MainScreenState extends State<MainScreen> {
   static const STATUS_BROADCAST_TIMEOUT = const Duration(seconds: 5);
 
-  final TextEditingController _serverIpTextController = new TextEditingController();
-  final TextEditingController _idTextController = new TextEditingController();
+  final TextEditingController _managerHostController = new TextEditingController();
+  final TextEditingController _managerPortController = new TextEditingController();
+  final TextEditingController _toolIdController = new TextEditingController();
   final ScrollController _messagesScrollController = new ScrollController();
+
+  Settings _settings = new Settings("192.168.1.6", 6644, 0, 100);
 
   final int _bufferSize = 500;
   List<Text> _messages = <Text>[];
@@ -47,21 +51,112 @@ class MainScreenState extends State<MainScreen> {
   Location _location = new Location();
   Timer _statusTimer;
 
+
+  MainScreenState() {
+    _settings.load().then((_) {
+      setState(() {
+        _managerHostController.text = _settings.managerHost;
+        _managerPortController.text = _settings.managerPort.toString();
+        _toolIdController.text = _settings.toolId.toString();
+      });
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final double statusBarHeight = MediaQuery.of(context).padding.top;
     Scaffold scaffold = new Scaffold(
       appBar: new AppBar(title: new Text("RTool")),
       drawer: new Drawer(
+        elevation: 16.0,
         child: new ListView(
+          padding: new EdgeInsets.only(top: statusBarHeight),
           children: <Widget>[
-            new DrawerHeader(child: new Text("Settings")),
+            new ListTile(
+              leading: new Icon(Icons.settings),
+              title: new Text("Settings"),
+              onTap: null,
+            ),
+            new TextFormField(
+              controller: _managerHostController,
+              decoration: new InputDecoration.collapsed(
+                  hintText: "server hostname"
+              ),
+              autocorrect: false,
+              onSaved: (String val) {
+                _settings.managerHost = val;
+                _settings.save();
+              },
+            ),
+            new TextFormField(
+              controller: _managerPortController,
+              decoration: new InputDecoration.collapsed(
+                  hintText: "server port"
+              ),
+              inputFormatters: [
+                WhitelistingTextInputFormatter.digitsOnly
+              ],
+              keyboardType: TextInputType.number,
+              autocorrect: false,
+              validator: (String s) {
+                int val = int.parse(s, onError: (_) => -1);
+                if (val < 1 || val > 65535) {
+                  return "Not a valid integer between 1 and 65535";
+                }
+                return null;
+              },
+              onSaved: (String val) {
+                _settings.managerPort = int.parse(val);
+                _settings.save();
+              },
+            ),
+            new TextFormField(
+              controller: _toolIdController,
+              decoration: new InputDecoration.collapsed(
+                  hintText: "tool ID"
+              ),
+              inputFormatters: [
+                WhitelistingTextInputFormatter.digitsOnly
+              ],
+              keyboardType: TextInputType.number,
+              autocorrect: false,
+              validator: (String s) {
+                int val = int.parse(s, onError: (_) => -1);
+                if (val < 0 || val > 255) {
+                  return "Not a valid integer between 0 and 255";
+                }
+                return null;
+              },
+              onSaved: (String val) {
+                _settings.toolId = int.parse(val);
+                _settings.save();
+              },
+            ),
+            new Text("Range: ${_settings.sensitivityRange} m"),
+            new Slider(
+              value: _settings.sensitivityRange.toDouble(),
+              min: 1.0,
+              max: 1000.0,
+              activeColor: Theme.of(context).errorColor,
+              onChanged: (double val) {
+                setState(() {
+                  _settings.sensitivityRange = val.round();
+                  _settings.save();
+                });
+              }
+            ),
+            new ListTile(
+              title: new Text(_running ? "Stop" : "Start"),
+              onTap: () => _handleStartStop(),
+              leading: new Icon(_running ? Icons.pause : Icons.play_arrow),
+            ),
             new ListTile(
               title: new Text('start/stop vibration'),
               onTap: () {
                 if (vibrating) {
                   _stopVibrate();
                 } else {
-                  _vibrate(8);
+                  _vibrate(0.8);
                 }
                 vibrating = !vibrating;
               },
@@ -82,26 +177,8 @@ class MainScreenState extends State<MainScreen> {
       ),
       body: new Column(
         children: <Widget>[
-          new TextFormField(
-            controller: _serverIpTextController,
-            decoration: new InputDecoration.collapsed(
-                hintText: "server IP address"
-            ),
-          ),
-          new TextFormField(
-            controller: _idTextController,
-            decoration: new InputDecoration.collapsed(
-                hintText: "tool ID"
-            ),
-            keyboardType: TextInputType.number,
-          ),
           new Row(
             children: <Widget>[
-              new RaisedButton(
-                onPressed: () => _handleStartStop(),
-                color: Theme.of(context).buttonColor,
-                child: new Text(_running ? "Stop" : "Start"),
-              ),
               new RaisedButton(
                 onPressed: () => setState(_clearLogMessages),
                 color: Theme.of(context).buttonColor,
@@ -127,6 +204,7 @@ class MainScreenState extends State<MainScreen> {
         ]
       )
     );
+
     return scaffold;
   }
 
@@ -136,7 +214,7 @@ class MainScreenState extends State<MainScreen> {
       _addLogMessage(_running ? "Started." : "Stopped.");
     });
     if (_running) {
-      Socket.connect(_serverIpTextController.text, 6644).then((socket) {
+      Socket.connect(_managerHostController.text, 6644).then((socket) {
         setState(() => _addLogMessage("Connected!"));
         _socket = socket;
         _socket.listen((data) {
@@ -159,11 +237,11 @@ class MainScreenState extends State<MainScreen> {
   }
 
   String _getId() {
-    return _idTextController.text;
+    return _toolIdController.text;
   }
 
   Future<Null> _playFrequency(int frequency, [int duration]) async {
-    var params = {"frequency": frequency};
+    Map<String, Object> params = <String, Object>{"frequency": frequency};
     if (duration != null) {
       print("Trying to play $frequency Hz for $duration ms");
       params["duration"] = duration;
@@ -186,8 +264,8 @@ class MainScreenState extends State<MainScreen> {
     }
   }
 
-  Future<Null> _vibrate(int level, [int duration]) async {
-    var params = {"level": level};
+  Future<Null> _vibrate(double level, [int duration]) async {
+    Map<String, Object> params = <String, Object>{"level": level};
     if (duration != null) {
       print("Trying to vibrate for $duration ms");
       params["duration"] = duration;
