@@ -7,9 +7,12 @@ import sys
 import collections
 import enum
 import math
+import copy
+import os.path
 
 import geopy
 import geopy.distance
+import flask
 
 
 BUFFER_SIZE = 1024
@@ -23,6 +26,9 @@ ThreadMessage = collections.namedtuple('ThreadMessage', ['type', 'payload'])
 class ThreadMessageType(enum.Enum):
     STATUS = 1
     POWER_SPOT_RSSI = 2
+    ADD_POWER_SPOT = 3
+    GET_POWER_SPOTS = 4
+    DELETE_POWER_SPOT = 5
 
 
 def get_distance(a, b):
@@ -138,12 +144,13 @@ class Client(threading.Thread):
 
 
 class World(threading.Thread):
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, config_file: str):
         super().__init__(name='World')
         self.log = logging.getLogger(str(self.__class__))
         self.clients = []
         self.power_spots = config.get('power-spots', [])
         self.queue = queue.Queue()
+        self.config_file = config_file
         self.setDaemon(True)
 
     def join_all(self):
@@ -157,6 +164,12 @@ class World(threading.Thread):
             self.log.debug('Received instruction: {}'.format(item))
             if item.type == ThreadMessageType.STATUS:
                 self.handle_status(item.payload)
+            elif item.type == ThreadMessageType.ADD_POWER_SPOT:
+                self.handle_add_power_spot(item.payload)
+            elif item.type == ThreadMessageType.GET_POWER_SPOTS:
+                self.handle_get_power_spots(item.payload)
+            elif item.type == ThreadMessageType.DELETE_POWER_SPOT:
+                self.handle_delete_power_spot(item.payload)
 
     def handle_status(self, client: Client):
         distances = zip(self.power_spots,
@@ -170,14 +183,94 @@ class World(threading.Thread):
         client.queue.put(ThreadMessage(ThreadMessageType.POWER_SPOT_RSSI,
                                        payload))
 
+    def handle_add_power_spot(self, power_spot):
+        power_spot['lat'] = float(power_spot['lat'])
+        power_spot['lon'] = float(power_spot['lon'])
+        power_spot['radiation-strength'] = float(power_spot['radiation-strength'])
+        self.log.debug('Adding power spot: {}'.format(power_spot))
+        self.power_spots.append(power_spot)
+        if self.config_file is None:
+            return
+        with open(self.config_file, mode='w') as f:
+            json.dump({'power-spots': self.power_spots}, f, indent=2,
+                      sort_keys=True)
+
+    def handle_get_power_spots(self, q: queue.Queue):
+        q.put(copy.deepcopy(self.power_spots))
+
+    def handle_delete_power_spot(self, name):
+        self.log.debug('Deleting power spot: {}'.format(name))
+        self.power_spots = [s for s in self.power_spots if s['name'] != name]
+        with open(self.config_file, mode='w') as f:
+            json.dump({'power-spots': self.power_spots}, f, indent=2,
+                      sort_keys=True)
+
 
 def main():
     logging.info('Starting...')
     config = dict()
+    config_file = None
     if len(sys.argv) > 1:
-        config = json.load(open(sys.argv[1]))
-    world = World(config)
+        config_file = sys.argv[1]
+        config = json.load(open(config_file))
+    world = World(config, config_file)
     world.start()
+
+    flask_app = flask.Flask(__name__, static_folder='')
+    flask_log = logging.getLogger('web')
+
+    @flask_app.route('/')
+    def serve_page():
+        return flask_app.send_static_file('map.html')
+
+    @flask_app.route('/save', methods=['GET'])
+    def save_power_spot():
+        args = flask.request.args
+        lat = args.get('lat')
+        lon = args.get('lon')
+        name = args.get('name')
+        flask_log.debug('Saving power spot: lat={}, lon={}, name={}'
+                        .format(lat, lon, name))
+        world.queue.put(ThreadMessage(
+            ThreadMessageType.ADD_POWER_SPOT,
+            {'lat': lat, 'lon': lon, 'name': name, 'radiation-strength': 0}))
+        return '', 200
+
+    @flask_app.route('/delete', methods=['GET'])
+    def delete_power_spot():
+        args = flask.request.args
+        name = args.get('name')
+        flask_log.debug('Deleting power spot: name={}'
+                        .format(name))
+        world.queue.put(ThreadMessage(
+            ThreadMessageType.DELETE_POWER_SPOT, name))
+        return '', 200
+
+    @flask_app.route('/power-spots')
+    def power_spots():
+        q = queue.Queue()
+        world.queue.put(ThreadMessage(ThreadMessageType.GET_POWER_SPOTS, q))
+        spots = q.get()
+        return json.dumps(spots), '200', {'ContentType': 'application/json'}
+
+    @flask_app.route('/apk')
+    def apk():
+        if not os.path.exists('rtool.apk'):
+            return (
+                """<html><body><h1>apk is not available</h1></body></html>""",
+                404, {'ContentType': 'text/html'})
+        return flask.send_file(
+            'rtool.apk', mimetype='application/vnd.android.package-archive',
+            attachment_filename='rtool.apk', as_attachment=True)
+
+    flask_thread = threading.Thread(
+        target=lambda: flask_app.run(debug=False, host='localhost',
+                                     port='8080'),
+        name='web',
+        daemon=True
+    )
+    flask_thread.start()
+
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(('', 6644))
     server_socket.listen(5)

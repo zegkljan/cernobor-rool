@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+        <script src="https://code.jquery.com/jquery-1.12.4.js"></script>
+        <style>
+            html, body {
+                height: 100%;
+                margin: 0;
+                padding-left: 1px;
+                padding-right: 1px;
+            }
+
+            #content {
+                display: flex;
+                flex-flow: column;
+                height: 100%;
+            }
+
+            #content #head, #content #map {
+                border: 1px dotted grey;
+            }
+
+            #content #head {
+                flex: 0 1 auto;
+                /* The above is shorthand for:
+                flex-grow: 0,
+                flex-shrink: 1,
+                flex-basis: auto
+                */
+            }
+
+            #content #map {
+                flex: 1 1 auto;
+                width: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="form" style="display: none;">
+            Name: <input type="text" id="name"><br>
+            <input type="button" onclick="saveData()" value="OK">
+        </div>
+        <div id="delete" style="display: none;">
+            <input type="button" onclick="deleteMarker()" value="Delete">
+        </div>
+        <div id="content">
+            <h3 id="head"><a href="apk">Download the .apk</a></h3>
+            <div id="map"></div>
+            <script>
+                var map;
+                var marker;
+                var infowindow;
+                var deletewindow;
+                var state = null;
+
+                function initMap() {
+                    map = new google.maps.Map(document.getElementById('map'), {
+                        zoom: 12,
+                        center: {lat: 50.080672, lng: 14.437977},
+                        draggableCursor: 'crosshair'
+                    });
+                    loadMarkers();
+
+                    infowindow = new google.maps.InfoWindow({
+                        content: document.getElementById('form')
+                    });
+                    infowindow.addListener('closeclick', cancelMarker);
+                    deletewindow = new google.maps.InfoWindow({
+                        content: document.getElementById('delete')
+                    });
+
+                    map.addListener('click', function(e) {
+                        infowindow.getContent().style = "display: none";
+                        infowindow.close();
+                        deletewindow.getContent().style = "display: none";
+                        deletewindow.close();
+                        if (state === 'adding' && marker !== null && marker !== undefined) {
+                            marker.setMap(null);
+                        }
+                        marker = new google.maps.Marker({
+                            position: e.latLng,
+                            map: map
+                        });
+                        state = 'adding';
+                        infowindow.open(map, marker);
+                        infowindow.getContent().style = "display: block";
+                    });
+                }
+
+                function cancelMarker() {
+                    infowindow.getContent().style = "display: none";
+                    infowindow.close();
+                    marker.setMap(null);
+                }
+
+                function saveData() {
+                    var name = document.getElementById('name').value;
+                    var lat = marker.getPosition().lat();
+                    var lon = marker.getPosition().lng();
+                    marker.setTitle(name);
+                    console.log('Saving marker: ' + JSON.stringify({lat: lat, lon: lon, name: name}));
+                    marker = null;
+                    $.get(
+                        "/save",
+                        {
+                            lat: lat,
+                            lon: lon,
+                            name: name
+                        }
+                    );
+                    infowindow.getContent().style = "display: none";
+                    infowindow.close();
+                }
+
+                function loadMarkers() {
+                    $.getJSON(
+                        "/power-spots",
+                        function (data) {
+                            $.each(data, function(_, val) {
+                                var latLng = {lat: val.lat, lng: val.lon};
+                                console.log('Adding marker: ' + JSON.stringify(latLng));
+                                var m = new google.maps.Marker({
+                                    position: latLng,
+                                    map: map,
+                                    title: val.name
+                                });
+                                m.addListener('click', function (e) {
+                                    console.log('click on marker ' + JSON.stringify(m.getPosition()));
+                                    deletewindow.getContent().style = "display: none";
+                                    deletewindow.close();
+                                    if (state === 'adding' && marker !== null && marker !== undefined) {
+                                        marker.setMap(null);
+                                    }
+                                    marker = m;
+                                    state = 'deleting';
+                                    deletewindow.getContent().style = "display: block";
+                                    deletewindow.open(map, marker);
+                                });
+                            })
+                        }
+                    )
+                }
+
+                function deleteMarker() {
+                    console.log('deleting marker ' + marker.getTitle());
+                    $.get(
+                        "/delete",
+                        {
+                            name: marker.getTitle()
+                        }
+                    );
+                    marker.setMap(null);
+                    marker = null;
+                }
+            </script>
+            <script async defer
+            src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDwhXR7Aa8QPXuUVnVps5HlEmjG4L402xI&callback=initMap">
+            </script>
+        </div>
+    </body>
+</html>
