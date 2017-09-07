@@ -73,7 +73,8 @@ class Client(threading.Thread):
         if item.type == ThreadMessageType.POWER_SPOT_RSSI:
             self.send_message({'type': 'power-spot-rssi',
                                'dBm': item.payload['dBm'],
-                               'dBm-threshold': item.payload['dBm-threshold']})
+                               'dBm-threshold': item.payload['dBm-threshold'],
+                               'distance': item.payload['distance']})
 
     def send_message(self, msg):
         msg_str = json.dumps(msg)
@@ -162,7 +163,8 @@ class World(threading.Thread):
                          for spot in self.power_spots])
         spot, d = min(distances, key=lambda x: x[1])
         payload = {'dBm': spot['radiation-strength'] - fspl(d),
-                   'dBm-threshold': -fspl(client.sensitivity_range)}
+                   'dBm-threshold': -fspl(client.sensitivity_range),
+                   'distance': d}
         client.queue.put(ThreadMessage(ThreadMessageType.POWER_SPOT_RSSI,
                                        payload))
 
