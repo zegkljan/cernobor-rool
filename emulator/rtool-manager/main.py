@@ -26,8 +26,8 @@ class ThreadMessageType(enum.Enum):
 
 
 def get_distance(a, b):
-    return geopy.distance.vincenty((a['lat'], a['lon']),
-                                   (b['lat'], b['lon'])).meters
+    return geopy.distance.great_circle((a['lat'], a['lon']),
+                                       (b['lat'], b['lon'])).meters
 
 
 def fspl(d: float) -> float:
