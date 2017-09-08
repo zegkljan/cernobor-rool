@@ -17,19 +17,24 @@ class Settings {
   Settings(this.managerHost, this.managerPort, this.toolId, this.sensitivityRange);
 
   Future load() async {
+    print("Loading...");
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    this.managerHost = prefs.getString(_MANAGER_HOST_KEY) ?? "192.168.1.6";
+    this.managerHost = prefs.getString(_MANAGER_HOST_KEY) ?? "147.251.253.243";
     this.managerPort = prefs.getInt(_MANAGER_PORT_KEY) ?? 6644;
-    this.toolId = prefs.getInt(_TOOL_ID_KEY) ?? 0;
+    this.toolId = prefs.getInt(_TOOL_ID_KEY) ?? 128;
     this.sensitivityRange = prefs.getInt(_SENSITIVITY_RANGE_KEY) ?? 100.0;
+    print("Loaded.");
   }
 
-  Future save() async {
+  Future<Null> save() async {
+    print("Saving...");
     SharedPreferences prefs = await SharedPreferences.getInstance();
     prefs.setString(_MANAGER_HOST_KEY, managerHost);
     prefs.setInt(_MANAGER_PORT_KEY, managerPort);
     prefs.setInt(_TOOL_ID_KEY, toolId);
     prefs.setInt(_SENSITIVITY_RANGE_KEY, sensitivityRange);
+    await prefs.commit();
+    print("Saved.");
   }
 
   @override

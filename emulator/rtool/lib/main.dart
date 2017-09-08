@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:location/location.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'messages.dart';
 import 'settings.dart';
 
@@ -30,15 +31,18 @@ class MainScreen extends StatefulWidget {
 
 class MainScreenState extends State<MainScreen> {
   static const STATUS_BROADCAST_TIMEOUT = const Duration(seconds: 5);
+  static const VIBRATION_IDLE_TIMEOUT = const Duration(seconds: 1);
+  static const VIBRATION_LENGTH = 100;
+  static const MAX_VIBRATION_INTERVAL = 2000;
 
   final TextEditingController _managerHostController = new TextEditingController();
   final TextEditingController _managerPortController = new TextEditingController();
   final TextEditingController _toolIdController = new TextEditingController();
   final ScrollController _messagesScrollController = new ScrollController();
 
-  Settings _settings = new Settings("192.168.1.6", 6644, 0, 100);
+  Settings _settings = new Settings("0.0.0.0", 0, 0, 1);
 
-  final int _bufferSize = 500;
+  final int _bufferSize = 30;
   List<Text> _messages = <Text>[];
   int _startIndex = 0;
 
@@ -49,7 +53,16 @@ class MainScreenState extends State<MainScreen> {
   bool _running = false;
   Socket _socket;
   Location _location = new Location();
+  Map<String, double> _currentLocation;
+  StreamSubscription<Map<String, double>> _locationSubscription;
   Timer _statusTimer;
+  Duration _vibrationInterval;
+  String _nearestPowerSpotName;
+  double _nearestPowerSpotDistance;
+  double _nearestPowerSpotRssi;
+  double _intensity;
+  double _dBmThreshold;
+  double _dBmTolerance = -25.0;
 
 
   MainScreenState() {
@@ -74,21 +87,16 @@ class MainScreenState extends State<MainScreen> {
           children: <Widget>[
             new ListTile(
               leading: new Icon(Icons.settings),
-              title: new Text("Settings"),
+              title: new Text("Settings:"),
               onTap: null,
             ),
-            new TextFormField(
+            new TextField(
               controller: _managerHostController,
               decoration: new InputDecoration.collapsed(
                   hintText: "server hostname"
               ),
-              autocorrect: false,
-              onSaved: (String val) {
-                _settings.managerHost = val;
-                _settings.save();
-              },
             ),
-            new TextFormField(
+            new TextField(
               controller: _managerPortController,
               decoration: new InputDecoration.collapsed(
                   hintText: "server port"
@@ -98,19 +106,8 @@ class MainScreenState extends State<MainScreen> {
               ],
               keyboardType: TextInputType.number,
               autocorrect: false,
-              validator: (String s) {
-                int val = int.parse(s, onError: (_) => -1);
-                if (val < 1 || val > 65535) {
-                  return "Not a valid integer between 1 and 65535";
-                }
-                return null;
-              },
-              onSaved: (String val) {
-                _settings.managerPort = int.parse(val);
-                _settings.save();
-              },
             ),
-            new TextFormField(
+            new TextField(
               controller: _toolIdController,
               decoration: new InputDecoration.collapsed(
                   hintText: "tool ID"
@@ -120,45 +117,67 @@ class MainScreenState extends State<MainScreen> {
               ],
               keyboardType: TextInputType.number,
               autocorrect: false,
-              validator: (String s) {
-                int val = int.parse(s, onError: (_) => -1);
-                if (val < 0 || val > 255) {
-                  return "Not a valid integer between 0 and 255";
-                }
-                return null;
-              },
-              onSaved: (String val) {
-                _settings.toolId = int.parse(val);
-                _settings.save();
-              },
             ),
             new Text("Range: ${_settings.sensitivityRange} m"),
             new Slider(
               value: _settings.sensitivityRange.toDouble(),
               min: 1.0,
-              max: 1000.0,
+              max: 500.0,
               activeColor: Theme.of(context).errorColor,
               onChanged: (double val) {
                 setState(() {
                   _settings.sensitivityRange = val.round();
-                  _settings.save();
                 });
               }
             ),
             new ListTile(
               title: new Text(_running ? "Stop" : "Start"),
-              onTap: () => _handleStartStop(),
+              onTap: () {
+                _toggleRunning();
+                _handleStartStop();
+                if (_running) {
+                  Navigator.pop(context);
+                }
+              },
               leading: new Icon(_running ? Icons.pause : Icons.play_arrow),
             ),
+            new RaisedButton(
+                child: new Text("Open spot editor (web)"),
+                onPressed: () async {
+                  String url = "http://${_settings.managerHost}:8080";
+                  if (await canLaunch(url)) {
+                    await launch(url);
+                  } else {
+                    showDialog<Null>(
+                        context: context,
+                        child: new AlertDialog(
+                          title: new Text("Cannot open URL!"),
+                          content: new Text(url),
+                          actions: <Widget>[
+                            new FlatButton(
+                              child: new Text("OK"),
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                              }
+                            ),
+                          ]
+                        ),
+                        barrierDismissible: true,
+                    );
+                  }
+                }
+            ),/*
             new ListTile(
               title: new Text('start/stop vibration'),
               onTap: () {
-                if (vibrating) {
-                  _stopVibrate();
-                } else {
-                  _vibrate(0.8);
-                }
-                vibrating = !vibrating;
+                setState(() {
+                  if (vibrating) {
+                    _vibrationInterval = null;
+                  } else {
+                    _vibrationInterval = new Duration(milliseconds: 100);
+                  }
+                  vibrating = !vibrating;
+                });
               },
             ),
             new ListTile(
@@ -171,12 +190,19 @@ class MainScreenState extends State<MainScreen> {
                 }
                 sounding = !sounding;
               },
-            )
+            )*/
           ],
         ),
       ),
       body: new Column(
         children: <Widget>[
+          new Text("Nearest power spot name: $_nearestPowerSpotName"),
+          new Text("Nearest power spot distance: ${_nearestPowerSpotDistance?.toStringAsFixed(3)} m"),
+          new Text("Nearest power spot RSSI: ${_nearestPowerSpotRssi?.toStringAsFixed(3)} dBm"),
+          new Text("dBm threshold: ${_dBmThreshold?.toStringAsFixed(3)}, dBm tolerance: ${_dBmTolerance?.toStringAsFixed(3)}"),
+          new Text("Intensity: ${_intensity?.toStringAsFixed(3)}"),
+          new Text("Vibration interval: ${_vibrationInterval?.inMilliseconds ?? "-"}"),
+          new Text("lat: ${_currentLocation == null ? "-" : _currentLocation["latitude"]}, lon: ${_currentLocation == null ? "-" : _currentLocation["longitude"]}"),
           new Row(
             children: <Widget>[
               new RaisedButton(
@@ -194,8 +220,8 @@ class MainScreenState extends State<MainScreen> {
           new Divider(height: 1.0, color: Theme.of(context).dividerColor,),
           new Flexible(
             child: new ListView.builder(
-              padding: new EdgeInsets.only(bottom: 20.0),
-              reverse: false,
+              padding: new EdgeInsets.only(bottom: 5.0),
+              reverse: true,
               itemBuilder: (_, int index) => _getLogMessage(index),
               itemCount: min(_bufferSize, _messages.length),
               controller: _messagesScrollController,
@@ -208,47 +234,130 @@ class MainScreenState extends State<MainScreen> {
     return scaffold;
   }
 
-  void _handleStartStop() {
-    _running = !_running;
-    setState(() {
-      _addLogMessage(_running ? "Started." : "Stopped.");
-    });
-    if (_running) {
-      Socket.connect(_managerHostController.text, 6644).then((socket) {
-        setState(() => _addLogMessage("Connected!"));
-        _socket = socket;
-        _socket.listen((List<int> data) {
-          String message = UTF8.decode(data);
-          _handleMessage(message);
-          setState(() => _addLogMessage(message));
-        });
-        _statusTimer = new Timer.periodic(STATUS_BROADCAST_TIMEOUT, (_) {
-          print("broadcasting status");
-          _statusBroadcast();
-        });
+
+  @override
+  void initState() {
+    super.initState();
+    initPlatformState();
+    _locationSubscription = _location.onLocationChanged.listen((Map<String,double> result) {
+      print("Acquired location: $result");
+      setState(() {
+        _currentLocation = result;
       });
+    });
+
+    new Timer(VIBRATION_IDLE_TIMEOUT, _vibrationTimer);
+  }
+
+  Future initPlatformState() async {
+    Map<String, double> location;
+
+    try {
+      location = await _location.getLocation;
+    } on PlatformException catch (e) {
+      print(e);
+      location = null;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    print("Retrieved initial location: $location");
+    setState(() {
+      _currentLocation = location;
+    });
+  }
+
+  void _saveSettings() {
+    _settings.managerHost = _managerHostController.text;
+    _settings.managerPort = int.parse(_managerPortController.text);
+    _settings.toolId = int.parse(_toolIdController.text);
+    _settings.save();
+  }
+
+  void _toggleRunning() {
+    setState(() {
+      print("Toggling running: $_running -> ${!_running}");
+      _running = !_running;
+    });
+  }
+
+  void _handleStartStop() {
+    _addLogMessage(_running ? "Started." : "Stopped.");
+    if (_running) {
+      _saveSettings();
+      Socket.connect(_settings.managerHost, _settings.managerPort)
+        .then((socket) {
+          setState(() => _addLogMessage("Connected!"));
+          _socket = socket;
+          _socket.listen(
+            (List<int> data) {
+              String message = UTF8.decode(data);
+              _handleMessage(message);
+            },
+            onDone: () {
+              _addLogMessage("Disconnected!");
+              _toggleRunning();
+              _handleStartStop();
+            }
+          );
+          _statusTimer = new Timer.periodic(STATUS_BROADCAST_TIMEOUT, (_) {
+            print("broadcasting status");
+            _statusBroadcast();
+          });
+        })
+        .catchError((e) {
+          setState(() {
+            _addLogMessage("Could not connect: $e");
+          });
+          _toggleRunning();
+          _handleStartStop();
+        });
     } else {
       if (_socket != null) {
-        _socket.close();
+        _socket.destroy();
       }
       _socket = null;
       if (_statusTimer != null) {
         _statusTimer.cancel();
       }
+      _vibrationInterval = null;
+      print("Vibration interval: $_vibrationInterval");
+      _stopVibrate();
+      _stopSound();
     }
+  }
+
+  double _mapDbmToIntensity(double dBm, double dBmTolerance, double dBmThreshold) {
+    return sqrt(dBm / (dBmTolerance - dBmThreshold) - dBmThreshold / (dBmTolerance - dBmThreshold));
   }
 
   void _handleMessage(String message) {
     var msg = JSON.decode(message);
-    if (IncomingMessage.POWER_SPOT_RSSI.getTypeName() == msg["type"]) {
-      double dBm = msg["dBm"];
-      double dBmThreshold = msg["dBm-threshold"];
-      if (dBm > dBmThreshold) {
-        _vibrate((dBm - dBmThreshold) / dBmThreshold);
-      } else {
-        _stopVibrate();
+    print("Handling message: $msg");
+    setState(() {
+      if (IncomingMessage.POWER_SPOT_RSSI.getTypeName() == msg["type"]) {
+        double dBm = msg["dBm"];
+        _dBmThreshold = msg["dBm-threshold"];
+        if (dBm > _dBmThreshold) {
+          _intensity = _mapDbmToIntensity(dBm, _dBmTolerance, _dBmThreshold);
+          int interval = (MAX_VIBRATION_INTERVAL * (1 - _intensity)).round();
+          print("In threshold - intensity: $_intensity interval: $interval");
+          _vibrationInterval = new Duration(milliseconds: interval);
+          _nearestPowerSpotName = msg["name"];
+          _nearestPowerSpotDistance = msg["distance"];
+          _nearestPowerSpotRssi = dBm;
+        } else {
+          _vibrationInterval = null;
+          _nearestPowerSpotName = null;
+          _nearestPowerSpotDistance = null;
+          _nearestPowerSpotRssi = null;
+        }
+      } else if (IncomingMessage.PONG.getTypeName() == msg["type"]) {
+        _addLogMessage(msg.toString());
       }
-    }
+    });
   }
 
   String _getId() {
@@ -279,14 +388,9 @@ class MainScreenState extends State<MainScreen> {
     }
   }
 
-  Future<Null> _vibrate(double level, [int duration]) async {
-    Map<String, Object> params = <String, Object>{"level": level};
-    if (duration != null) {
-      print("Trying to vibrate for $duration ms");
-      params["duration"] = duration;
-    } else {
-      print("Trying to vibrate for indefinitely");
-    }
+  Future<Null> _vibrate(int duration) async {
+    Map<String, Object> params = <String, Object>{"duration": duration};
+    print("Trying to vibrate for $duration ms");
     try {
       await platform.invokeMethod("vibrate", params);
     } on PlatformException catch (e) {
@@ -304,36 +408,59 @@ class MainScreenState extends State<MainScreen> {
   }
 
   void _ping() {
+    if (_socket == null) {
+      _addLogMessage("Not connected!");
+      return;
+    }
     new PingMessage(_getId()).send(_socket);
   }
 
   void _statusBroadcast() {
     try {
-      _location.getLocation.then((Map<String, double> loc) {
-        new StatusBroadcastMessage(_getId(), loc["latitude"], loc["longitude"], _settings.sensitivityRange).send(_socket);
-      });
+      if (_currentLocation.containsKey("latitude") && _currentLocation.containsKey("latitude")) {
+        new StatusBroadcastMessage(_getId(), _currentLocation["latitude"], _currentLocation["longitude"],
+            _settings.sensitivityRange).send(_socket);
+      }
     } catch (exc) {
       print("Status broadcast exc: $exc");
     }
   }
 
   void _addLogMessage(String msg) {
-    msg = new DateTime.now().toString() + ": " + msg;
-    if (_messages.length < _bufferSize) {
-      _messages.add(new Text(msg));
-    } else {
-      _messages[_startIndex] = new Text(msg);
-      _startIndex = (_startIndex + 1) % _bufferSize;
-    }
-    _messagesScrollController.jumpTo(_messagesScrollController.position.maxScrollExtent);
+    setState(() {
+      msg = new DateTime.now().toString() + ": " + msg;
+      if (_messages.length < _bufferSize) {
+        _messages.add(new Text(msg));
+      } else {
+        _messages.removeLast();
+        _messages.insert(0, new Text(msg));
+      }
+    });
+    _messagesScrollController.jumpTo(0.0);
   }
 
   Text _getLogMessage(int index) {
-    return _messages[(index + _startIndex) % _bufferSize];
+    return _messages[index];
   }
 
   void _clearLogMessages() {
     _messages.clear();
     _startIndex = 0;
+  }
+
+  void _vibrationTimer() {
+    if (_vibrationInterval == null) {
+      //print("Vibration timer: idle");
+      _stopVibrate();
+      new Timer(VIBRATION_IDLE_TIMEOUT, _vibrationTimer);
+    } else if (_vibrationInterval.inMilliseconds <= VIBRATION_LENGTH) {
+      //print("Vibration timer: continuous");
+      _vibrate(-1);
+      new Timer(VIBRATION_IDLE_TIMEOUT, _vibrationTimer);
+    } else {
+      //print("Vibration timer: active: $_vibrationInterval");
+      _vibrate(VIBRATION_LENGTH);
+      new Timer(_vibrationInterval, _vibrationTimer);
+    }
   }
 }

@@ -5,6 +5,7 @@ class IncomingMessage {
   final String _value;
   const IncomingMessage._internal(this._value);
 
+  static const PONG = const IncomingMessage._internal('pong');
   static const POWER_SPOT_RSSI = const IncomingMessage._internal('power-spot-rssi');
   static const CHANNELING_RSSI = const IncomingMessage._internal('channeling-rssi');
 
@@ -28,7 +29,9 @@ abstract class Message {
     if (payload != null) {
       data["payload"] = payload;
     }
-    socket.write(JSON.encode(data));
+    String msg = JSON.encode(data);
+    print("Sending message: $msg");
+    socket.write(msg);
   }
 }
 

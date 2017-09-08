@@ -40,16 +40,20 @@ public class MainActivity extends FlutterActivity {
                                 stopSound();
                                 break;
                             case "vibrate": {
-                                Double level = methodCall.argument("level");
+                                Long duration = ((Integer) methodCall.argument("duration")).longValue();
                                 if (vibratorProxy == null) {
                                     vibratorProxy = new VibratorProxy((Vibrator) getSystemService(VIBRATOR_SERVICE));
                                 }
-                                vibratorProxy.vibrate(level);
+                                vibratorProxy.vibrate(duration);
                                 break;
                             }
-                            case "stopVibrate":
+                            case "stopVibrate": {
+                                if (vibratorProxy == null) {
+                                    vibratorProxy = new VibratorProxy((Vibrator) getSystemService(VIBRATOR_SERVICE));
+                                }
                                 vibratorProxy.stop();
                                 break;
+                            }
                         }
                     }
                 }

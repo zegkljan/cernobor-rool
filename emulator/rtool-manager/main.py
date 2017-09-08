@@ -28,6 +28,7 @@ class ThreadMessageType(enum.Enum):
     ADD_POWER_SPOT = 3
     GET_POWER_SPOTS = 4
     DELETE_POWER_SPOT = 5
+    TERMINATE = 6
 
 
 def get_distance(a, b):
@@ -44,14 +45,15 @@ class Client(threading.Thread):
         super().__init__(name='{}:{}'.format(address, port))
         self.log = logging.getLogger(str(self.__class__))
         self.sock = sock
-        self.setDaemon(True)
+        self.setDaemon(False)
         self.queue = queue.Queue()
         self.world = world
         self.coords = None
         self.sensitivity_range = float('inf')
+        self.keep_running = True
 
     def run(self):
-        self.sock.settimeout(1.0)
+        self.sock.settimeout(0.2)
         for msg in self.load_messages():
             if msg is not None:
                 self.log.debug('Received message: {}'.format(msg))
@@ -81,6 +83,8 @@ class Client(threading.Thread):
                                'dBm-threshold': item.payload['dBm-threshold'],
                                'distance': item.payload['distance'],
                                'name': item.payload['name']})
+        elif item.type == ThreadMessageType.TERMINATE:
+            self.keep_running = False
 
     def send_message(self, msg):
         msg_str = json.dumps(msg)
@@ -92,7 +96,7 @@ class Client(threading.Thread):
         buffer = ''
         state = None
         braces = 0
-        while True:
+        while self.keep_running:
             try:
                 data = self.sock.recv(BUFFER_SIZE)
             except socket.timeout:
@@ -150,15 +154,17 @@ class World(threading.Thread):
         self.power_spots = config.get('power-spots', [])
         self.queue = queue.Queue()
         self.config_file = config_file
-        self.setDaemon(True)
+        self.setDaemon(False)
+        self.keep_running = True
 
     def join_all(self):
         while True:
             if self.clients:
                 self.clients.pop().join()
+            return
 
     def run(self):
-        while True:
+        while self.keep_running:
             item = self.queue.get()
             self.log.debug('Received instruction: {}'.format(item))
             if item.type == ThreadMessageType.STATUS:
@@ -169,6 +175,9 @@ class World(threading.Thread):
                 self.handle_get_power_spots(item.payload)
             elif item.type == ThreadMessageType.DELETE_POWER_SPOT:
                 self.handle_delete_power_spot(item.payload)
+            elif item.type == ThreadMessageType.TERMINATE:
+                self.handle_terminate()
+        self.log.info('Terminated.')
 
     def handle_status(self, client: Client):
         distances = zip(self.power_spots,
@@ -203,6 +212,16 @@ class World(threading.Thread):
         with open(self.config_file, mode='w') as f:
             json.dump({'power-spots': self.power_spots}, f, indent=2,
                       sort_keys=True)
+
+    def handle_terminate(self):
+        self.log.info('Terminating...')
+        for client in self.clients:
+            self.log.debug('Senting termination instruction to '
+                           'client {}'.format(client.name))
+            client.queue.put(ThreadMessage(ThreadMessageType.TERMINATE, None))
+        self.log.info('Waiting for all clients to terminate...')
+        self.join_all()
+        self.keep_running = False
 
 
 def simple_response(code, message):
@@ -285,8 +304,8 @@ def main():
             world.clients.append(client_thread)
             client_thread.start()
     except:
-        #world.join_all()
-        raise
+        logging.warning('Received exception.', exc_info=True)
+        world.queue.put(ThreadMessage(ThreadMessageType.TERMINATE, None))
 
 if __name__ == '__main__':
     logging.basicConfig(

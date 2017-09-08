@@ -7,8 +7,8 @@
             html, body {
                 height: 100%;
                 margin: 0;
-                padding-left: 1px;
-                padding-right: 1px;
+                /*padding-left: 1px;
+                padding-right: 1px;*/
             }
 
             #content {
@@ -17,9 +17,9 @@
                 height: 100%;
             }
 
-            #content #head, #content #map {
+            /*#content #head, #content #map {
                 border: 1px dotted grey;
-            }
+            }*/
 
             #content #head {
                 flex: 0 1 auto;
@@ -34,6 +34,10 @@
                 flex: 1 1 auto;
                 width: 100%;
             }
+
+            .head-big {
+                font-size: xx-large;
+            }
         </style>
     </head>
     <body>
@@ -45,7 +49,14 @@
             <input type="button" onclick="deleteMarker()" value="Delete">
         </div>
         <div id="content">
-            <h3 id="head"><a href="apk">Download the .apk</a></h3>
+            <div id="head">
+                <span class="head-big">Power spot editor | </span>
+                <a href="apk">Download the .apk</a>
+                <span class="head-big"> | </span>
+                Click on map: add power spot
+                <span class="head-big"> | </span>
+                Click on power spot (marker): delete it
+            </div>
             <div id="map"></div>
             <script>
                 var map;
