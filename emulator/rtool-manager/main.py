@@ -1,19 +1,18 @@
-import socket
-import threading
-import logging
-import json
-import queue
-import sys
 import collections
-import enum
-import math
 import copy
+import enum
+import json
+import logging
+import math
 import os.path
+import queue
+import socket
+import sys
+import threading
 
+import flask
 import geopy
 import geopy.distance
-import flask
-
 
 BUFFER_SIZE = 1024
 FREQUENCY = 868e6
@@ -206,6 +205,11 @@ class World(threading.Thread):
                       sort_keys=True)
 
 
+def simple_response(code, message):
+    return ('<html><body><h1>{}</h1></body></html>'.format(message),
+            code, {'ContentType': 'text/html'})
+
+
 def main():
     logging.info('Starting...')
     config = dict()
@@ -256,15 +260,13 @@ def main():
     @flask_app.route('/apk')
     def apk():
         if not os.path.exists('rtool.apk'):
-            return (
-                """<html><body><h1>apk is not available</h1></body></html>""",
-                404, {'ContentType': 'text/html'})
+            return simple_response(404, 'apk is not available')
         return flask.send_file(
             'rtool.apk', mimetype='application/vnd.android.package-archive',
             attachment_filename='rtool.apk', as_attachment=True)
 
     flask_thread = threading.Thread(
-        target=lambda: flask_app.run(debug=False, host='localhost',
+        target=lambda: flask_app.run(debug=False, host='0.0.0.0',
                                      port='8080'),
         name='web',
         daemon=True
